@@ -6,17 +6,18 @@ LE_ADVERTISING_MANAGER_IFACE = 'org.bluez.LEAdvertisingManager1'
 LE_ADVERTISEMENT_IFACE = 'org.bluez.LEAdvertisement1'
 
 class Advertisement(dbus.service.Object):
-    def __init__(self, bus, index, hop_count):
+    def __init__(self, bus, index, hop_count,uuids):
         self.path = f"/org/bluez/example/advertisement{index}"
         self.bus = bus
         self.hop_count = hop_count
+        self.uuids = uuids
         dbus.service.Object.__init__(self, bus, self.path)
 
     def get_properties(self):
         return {
             LE_ADVERTISEMENT_IFACE: {
                 'Type': 'peripheral',
-                'ServiceUUIDs': [SERVICE_UUID],
+                'ServiceUUIDs': self.uuids,
                 'ServiceData': {SERVICE_UUID: [dbus.Byte(self.hop_count)]},
                 'IncludeTxPower': dbus.Boolean(True),
             }
@@ -41,8 +42,8 @@ class Advertiser:
         )
         self.adv = None
 
-    def start_advertising(self, hop_count):
-        self.adv = Advertisement(self.bus, 0, hop_count)
+    def start_advertising(self, hop_count,uuids):
+        self.adv = Advertisement(self.bus, 0, hop_count, uuids)
         self.adv_manager.RegisterAdvertisement(
             self.adv.path, {},
             reply_handler=lambda: print("Publicidade registada com sucesso!"),

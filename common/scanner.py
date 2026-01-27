@@ -91,3 +91,23 @@ class NodeControl:
                 print(f"[!] Erro ao desconectar: {e}")
         else:
             print("[!] Dispositivo não está na lista de ativos locais.")
+    def destroy_all_connections(self):
+        print("[*] Reação em Cadeia: A quebrar todas as ligações...")    
+        for addr in list(self.connected_devices.keys()):
+            self.destroy_connection(addr)
+    
+        if self.current_uplink:
+            self.destroy_connection(self.current_uplink)
+            self.current_uplink = None
+            self.my_hop_count = -1
+
+        print("[!] Nó isolado. Reinicie o programa para procurar novo Uplink.")
+        
+class ForwardingTable:
+    def __init__(self):
+        self.table = {} 
+
+    def update_route(self, nid, path):
+        if nid not in self.table:
+            print(f"[*] Nova rota aprendida: NID {nid} via {path}")
+        self.table[nid] = path
