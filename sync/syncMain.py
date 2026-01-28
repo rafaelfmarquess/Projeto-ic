@@ -4,6 +4,7 @@ from common.advertiser import Advertiser
 from common.scanner import ForwardingTable
 from common.consts import *
 from common.protocol import *
+from common.gatt import *
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -12,21 +13,13 @@ from common.cryptography import get_nid_from_cert
 from cryptography.hazmat.primitives import serialization
 from gi.repository import GLib
 
-SyncCert = None
-SyncKey = None
-CaCert = None
-
-class CertificateCharacteristic(Characteristic):
-    def __init__(self, bus, index, service, cert_pem):
-        self.uuid = '99999999-9999-9999-9999-999999999999'
-        self.cert_pem = cert_pem
-        Characteristic.__init__(self, bus, index, self.uuid, ['read'], service)
-
-    def ReadValue(self, options):
-        return dbus.Array(self.cert_pem, signature='y')
+MY_CERT = None
+MY_KEY = None
+CA_CERT = None
 
 class InboxCharacteristic(Characteristic):
-    def __init__(self, bus, index, service):
+    def __init__(self, bus, index, service,ft):
+        self.ft = ft
         Characteristic.__init__(self, bus, index, CHAT_MSG_UUID, ['write'], service)
 
     def WriteValue(self, value, options):
@@ -87,6 +80,8 @@ def main():
     
     app = Application(bus)
     service = Service(bus, '/org/bluez/example/service', 0, INBOX_SERVICE_UUID, True)
+    cert_chrc = CertificateCharacteristic(bus, 2, service, MY_CERT.public_bytes(serialization.Encoding.PEM))
+    service.add_characteristic(cert_chrc)
     service.add_characteristic(InboxCharacteristic(bus, 0, service, ft))
     service.add_characteristic(HeartbeatCharacteristic(bus, 1, service))
     app.add_service(service)

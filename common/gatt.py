@@ -152,4 +152,11 @@ class Application(dbus.service.Object):
                 for desc in chrc.get_descriptors():
                     response[desc.get_path()] = desc.get_properties()
         return response
-    
+class CertificateCharacteristic(Characteristic):
+    def __init__(self, bus, index, service, cert_pem):
+        self.uuid = '99999999-9999-9999-9999-999999999999'
+        self.cert_pem = cert_pem
+        Characteristic.__init__(self, bus, index, self.uuid, ['read'], service)
+
+    def ReadValue(self, options):
+        return dbus.Array(self.cert_pem, signature='y')
