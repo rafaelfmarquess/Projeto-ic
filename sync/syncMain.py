@@ -1,3 +1,4 @@
+import json
 import dbus.mainloop.glib
 from common.gatt import (
     Application, Service, Characteristic, 
@@ -13,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 import common.consts as consts
 from common.handshake import HandshakeManager
 from common.cryptography import get_nid_from_cert, generate_dh_keys
+from common.cryptography import verifyMac
 from gi.repository import GLib
 
 MY_CERT = None
@@ -27,11 +29,26 @@ class InboxCharacteristic(Characteristic):
 
     def WriteValue(self, value, options):
         packet = Packet.from_bytes(bytes(value))
-        if packet:
-            sender_path = options.get('device', 'unknown')
-            self.ft.update_route(packet.src_nid, sender_path)
-            
-            print(f"[SINK] Inbox: '{packet.payload}' recebido de {packet.src_nid}")
+        if not packet: return []
+
+        sender_path = options.get('device', 'unknown')
+        peer_addr = sender_path.split('dev_')[-1].replace('_', ':')
+        
+        key = handshake_manager.session_keys.get(peer_addr)
+        
+        if key and packet.mac:
+            try:
+                original_data = {
+                    "src": packet.src_nid, "dst": packet.dst_nid,
+                    "svc": packet.service, "plt": packet.payload, "mac": None
+                }
+                verifyMac(key, json.dumps(original_data).encode('utf-8'), bytes.fromhex(packet.mac))
+                print(f"[SINK] Mensagem AUTÊNTICA de {packet.src_nid}: {packet.payload}")
+            except Exception:
+                print(f"[!] AVISO: Mensagem corrompida ou MAC inválido de {packet.src_nid}!")
+        else:
+            print(f"[!] Mensagem ignorada: Falta chave de sessão ou MAC.")
+        
         return []
 
 class HeartbeatCharacteristic(Characteristic):

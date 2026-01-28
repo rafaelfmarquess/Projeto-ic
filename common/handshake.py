@@ -2,6 +2,9 @@ import dbus
 from common.consts import *
 from common.cryptography import verify_certificate, generate_dh_keys, derive_session_key
 from cryptography import x509
+from common.protocol import Packet
+import common.consts as consts
+from common.cryptography import verify_mac
 from cryptography.hazmat.primitives import serialization
 
 class HandshakeManager:
@@ -91,4 +94,15 @@ class HandshakeManager:
             print(f"[SINK] Chave de sessão gerada para {peer_addr}")
         except Exception as e:
             print(f"[!] Erro ao processar chave do peer: {e}")
+            
+    def confirmSession(self,peerAddr,isInitiator = True):
+        key = self.session_keys.get(peerAddr)
+        if not key : return False
+        
+        if isInitiator:
+            pkt = Packet(consts.MY_NID,"SINK","Control","KEY_CONFIRMATION")
+            print(f"[*] A enviar confirmação de chave para {peer_addr}...")
+            
+            return True
+        return False
 

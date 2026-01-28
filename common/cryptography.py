@@ -49,3 +49,14 @@ def derive_session_key(private_key, peer_public_key_bytes):
     ).derive(shared_secret)
     
     return derived_key
+
+def MAC(key,data):
+    h = hmac.HMAC(key,hashes.SHA256())
+    h.update(data)
+    return h.finalize()
+
+def verifyMac(key,data,mac):
+    h = hmac.HMAC(key,hashes.SHA256())
+    h.update(data)
+    h.verify(mac)
+    

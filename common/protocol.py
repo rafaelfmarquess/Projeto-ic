@@ -1,5 +1,6 @@
 import json
 from common.consts import MY_NID
+from common.cryptography import MAC
 
 class Packet:
     def __init__(self, src_nid, dst_nid, service, payload, mac=None):
@@ -9,7 +10,7 @@ class Packet:
         self.payload = payload
         self.mac = mac 
 
-    def to_bytes(self):
+    def to_bytes(self,sessionKey = None):
         data = {
             "src": self.src_nid,
             "dst": self.dst_nid,
@@ -17,6 +18,9 @@ class Packet:
             "plt": self.payload,
             "mac": self.mac
         }
+        if sessionKey:
+            raw_content = json.dumps(data).encode('utf-8')
+            data["mac"] = MAC(sessionKey,raw_content).hex()
         return json.dumps(data).encode('utf-8')
 
     @staticmethod
