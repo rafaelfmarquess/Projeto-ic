@@ -1,24 +1,27 @@
 import dbus.mainloop.glib
-from common.gatt import Application, Service, Characteristic
+from common.gatt import (
+    Application, Service, Characteristic, 
+    CertificateCharacteristic, KeyExchangeCharacteristic
+)
 from common.advertiser import Advertiser
 from common.scanner import ForwardingTable
 from common.consts import *
-from common.protocol import *
-from common.gatt import *
+from common.protocol import Packet
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 import common.consts as consts
-from common.cryptography import get_nid_from_cert
-from cryptography.hazmat.primitives import serialization
+from common.handshake import HandshakeManager
+from common.cryptography import get_nid_from_cert, generate_dh_keys
 from gi.repository import GLib
 
 MY_CERT = None
 MY_KEY = None
 CA_CERT = None
+handshake_manager = None
 
 class InboxCharacteristic(Characteristic):
-    def __init__(self, bus, index, service,ft):
+    def __init__(self, bus, index, service, ft):
         self.ft = ft
         Characteristic.__init__(self, bus, index, CHAT_MSG_UUID, ['write'], service)
 
@@ -42,7 +45,7 @@ class HeartbeatCharacteristic(Characteristic):
         if self.notifying:
             self.counter += 1
             data = str(self.counter).encode('utf-8')
-            signed = MY_KEY.sign(data,ec.ECDSA(hashes.SHA256()))
+            signed = MY_KEY.sign(data, ec.ECDSA(hashes.SHA256()))
             value = data + b'|' + signed
             self.PropertiesChanged(GATT_CHARACTERISTIC_IFACE, {'Value': dbus.Array(value, signature='y')}, [])
             print(f"[SINK] Heartbeat enviado: {self.counter}")
@@ -73,23 +76,41 @@ def load_credentials():
         exit(1)
 
 def main():
+    global handshake_manager
     load_credentials()
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
     ft = ForwardingTable()
     
+    handshake_manager = HandshakeManager(CA_CERT, MY_CERT, MY_KEY)
+    
     app = Application(bus)
     service = Service(bus, '/org/bluez/example/service', 0, INBOX_SERVICE_UUID, True)
-    cert_chrc = CertificateCharacteristic(bus, 2, service, MY_CERT.public_bytes(serialization.Encoding.PEM))
-    service.add_characteristic(cert_chrc)
+    
+    cert_bytes = MY_CERT.public_bytes(serialization.Encoding.PEM)
+    service.add_characteristic(CertificateCharacteristic(bus, 2, service, cert_bytes))
+    
+    _, local_dh_pub = generate_dh_keys()
+    pub_bytes = local_dh_pub.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    
+    def on_key_received(value):
+        handshake_manager.handle_incoming_key("NODE_DEVICE", value)
+
+    key_chrc = KeyExchangeCharacteristic(bus, 3, service, pub_bytes, on_key_received)
+    service.add_characteristic(key_chrc)
+
     service.add_characteristic(InboxCharacteristic(bus, 0, service, ft))
     service.add_characteristic(HeartbeatCharacteristic(bus, 1, service))
+    
     app.add_service(service)
     
     manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH), GATT_MANAGER_IFACE)
     manager.RegisterApplication(app.path, {}, reply_handler=None, error_handler=None)
 
-    GLib.timeout_add_seconds(5, service.get_characteristics()[1].send_heartbeat)
+    GLib.timeout_add_seconds(5, service.get_characteristics()[3].send_heartbeat)
     
     adv = Advertiser()
     adv.start_advertising(0, [SERVICE_UUID, INBOX_SERVICE_UUID])

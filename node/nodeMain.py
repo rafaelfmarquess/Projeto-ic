@@ -3,19 +3,21 @@ import dbus
 import dbus.mainloop.glib
 from common.scanner import NodeControl, ForwardingTable
 from common.advertiser import Advertiser
-from common.gatt import Application, Service, CertificateCharacteristic # Import centralizado
+from common.gatt import Application, Service, CertificateCharacteristic, KeyExchangeCharacteristic
 from common.consts import *
 import common.consts as consts
 from common.protocol import Packet
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from common.cryptography import get_nid_from_cert, verify_certificate
+from common.cryptography import get_nid_from_cert, verify_certificate, generate_dh_keys
+from common.handshake import HandshakeManager
 from gi.repository import GLib
 
 MY_CERT = None
 MY_KEY = None
 CA_CERT = None
+handshake_manager = None
 
 class HeartbeatMonitor:
     def __init__(self, node_control, sink_pub_key):
@@ -32,7 +34,7 @@ class HeartbeatMonitor:
             signature = parts[1]
             
             self.sink_pub_key.verify(signature, counter_data, ec.ECDSA(hashes.SHA256()))
-            print(f"[NODE] Heartbeat verificado: {counter_data.decode()}")
+            print(f"[NODE] Heartbeat verificado com sucesso: {counter_data.decode()}")
             self.missed_count = 0
         except Exception as e:
             print(f"[!] Erro na verificação do Heartbeat (Possível intruso): {e}")
@@ -40,7 +42,7 @@ class HeartbeatMonitor:
     def check_liveness(self):
         self.missed_count += 1
         if self.missed_count >= 3:
-            print("[!] LINK DOWN: 3 heartbeats perdidos ou falha de autenticação. A resetar...")
+            print("[!] LINK DOWN: 3 heartbeats perdidos ou falha de autenticação. A resetar nó...")
             self.ctrl.destroy_all_connections() 
             return False
         return True
@@ -72,36 +74,6 @@ def setup_heartbeat_listener(ctrl, monitor):
         print(f"[!] Erro ao ligar ao Heartbeat: {e}")
     return False
 
-def get_and_verify_uplink_cert(ctrl):
-    """Handshake de certificados: lê e valida o certificado do uplink."""
-    bus = dbus.SystemBus()
-    dev_path = f"{ADAPTER_PATH}/dev_{ctrl.current_uplink.replace(':', '_')}"
-    cert_uuid = '99999999-9999-9999-9999-999999999999'
-
-    try:
-        obj_manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE, "/"), DBUS_OM_IFACE)
-        objs = obj_manager.GetManagedObjects()
-
-        char_path = None
-        for path, ifaces in objs.items():
-            if GATT_CHARACTERISTIC_IFACE in ifaces:
-                if ifaces[GATT_CHARACTERISTIC_IFACE]['UUID'].lower() == cert_uuid and path.startswith(dev_path):
-                    char_path = path
-                    break
-
-        if not char_path: return None
-
-        char_iface = dbus.Interface(bus.get_object(BLUEZ_SERVICE, char_path), GATT_CHARACTERISTIC_IFACE)
-        cert_bytes = bytes(char_iface.ReadValue({}))
-        cert = x509.load_pem_x509_certificate(cert_bytes)
-        
-        if verify_certificate(cert, CA_CERT):
-            print(f"[+] Certificado do uplink ({ctrl.current_uplink}) validado.")
-            return cert.public_key()
-    except Exception as e:
-        print(f"[!] Erro no handshake: {e}")
-    return None
-
 def load_node_credentials(node_name):
     global MY_CERT, MY_KEY, CA_CERT
     try:
@@ -112,25 +84,30 @@ def load_node_credentials(node_name):
             consts.MY_NID = get_nid_from_cert(MY_CERT)
         with open(f"../certs/{node_name}_key.pem", "rb") as f:
             MY_KEY = serialization.load_pem_private_key(f.read(), password=None)
-        print(f"[NODE] Credenciais carregadas. NID oficial: {consts.MY_NID}")
+        print(f"[NODE] Credenciais carregadas para {node_name}. NID oficial: {consts.MY_NID}")
     except Exception as e:
         print(f"[!] Erro ao carregar certificados: {e}")
         exit(1)
 
 def main():
+    global handshake_manager
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     if len(sys.argv) < 2:
         print("Uso: python3 nodeMain.py [node1|node2|node3]")
         return
     
     load_node_credentials(sys.argv[1])
+    
+    handshake_manager = HandshakeManager(CA_CERT, MY_CERT, MY_KEY)
+    
     ctrl = NodeControl()
     adv = Advertiser()
 
     if ctrl.establish_uplink():
-        sink_pub_key = get_and_verify_uplink_cert(ctrl)
-        
-        if sink_pub_key:
+        if handshake_manager.perform_handshake(ctrl, ctrl.current_uplink):
+            
+            sink_pub_key = handshake_manager._get_and_verify_peer_cert(ctrl.current_uplink)
+            
             monitor = HeartbeatMonitor(ctrl, sink_pub_key)
             GLib.timeout_add_seconds(5, monitor.check_liveness)
             setup_heartbeat_listener(ctrl, monitor)
@@ -141,14 +118,25 @@ def main():
             
             cert_pem = MY_CERT.public_bytes(serialization.Encoding.PEM)
             service.add_characteristic(CertificateCharacteristic(bus, 0, service, cert_pem))
+            
+            _, local_dh_pub = generate_dh_keys()
+            dh_pub_bytes = local_dh_pub.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            key_chrc = KeyExchangeCharacteristic(bus, 1, service, dh_pub_bytes,
+                                               lambda val: handshake_manager.handle_incoming_key("DOWNLINK_DEVICE", val))
+            service.add_characteristic(key_chrc)
+            
             app.add_service(service)
             
             manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH), GATT_MANAGER_IFACE)
             manager.RegisterApplication(app.path, {}, reply_handler=None, error_handler=None)
             
             adv.start_advertising(ctrl.my_hop_count, [SERVICE_UUID])
+            print(f"[NODE] Handshake concluído e servidor GATT ativo.")
         else:
-            print("[!] Falha na autenticação do Uplink. A abortar...")
+            print("[!] Falha na autenticação ou acordo de chaves. A abortar...")
             ctrl.destroy_all_connections()
     else:
         adv.start_advertising(255, [SERVICE_UUID])

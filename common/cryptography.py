@@ -1,8 +1,10 @@
 import datetime
 from cryptography import x509
 from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hmac 
 
 def verify_certificate(cert_to_verify, ca_cert):
     try:
@@ -28,3 +30,22 @@ def get_nid_from_cert(cert):
         if attribute.oid == NameOID.COMMON_NAME:
             return attribute.value
     return None
+
+def generate_dh_keys():
+    private_key = ec.generate_private_key(ec.SECP521R1())
+    public_key = private_key.public_key()
+    return private_key, public_key
+
+def derive_session_key(private_key, peer_public_key_bytes):
+    peer_public_key = serialization.load_pem_public_key(peer_public_key_bytes)
+    
+    shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
+    
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'session-key-agreement',
+    ).derive(shared_secret)
+    
+    return derived_key

@@ -160,3 +160,17 @@ class CertificateCharacteristic(Characteristic):
 
     def ReadValue(self, options):
         return dbus.Array(self.cert_pem, signature='y')
+
+class KeyExchangeCharacteristic(Characteristic):
+    def __init__(self, bus, index, service, local_dh_pub_bytes, on_key_received_callback):
+        self.uuid = '77777777-7777-7777-7777-777777777777'
+        self.local_pub = local_dh_pub_bytes
+        self.callback = on_key_received_callback
+        Characteristic.__init__(self, bus, index, self.uuid, ['read', 'write'], service)
+
+    def ReadValue(self, options):
+        return dbus.Array(self.local_pub, signature='y')
+
+    def WriteValue(self, value, options):
+        self.callback(bytes(value))
+        return []
