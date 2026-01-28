@@ -1,6 +1,8 @@
+import datetime
 from cryptography import x509
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 
 def verify_certificate(cert_to_verify, ca_cert):
     try:
@@ -13,10 +15,12 @@ def verify_certificate(cert_to_verify, ca_cert):
         
         now = datetime.datetime.utcnow()
         if cert_to_verify.not_valid_before > now or cert_to_verify.not_valid_after < now:
+            print("[CRYPTO] Certificado fora do prazo de validade.")
             return False
             
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[CRYPTO] Falha na verificação: {e}")
         return False
 
 def get_nid_from_cert(cert):

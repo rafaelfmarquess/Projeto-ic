@@ -4,6 +4,8 @@ from common.advertiser import Advertiser
 from common.scanner import ForwardingTable
 from common.consts import *
 from common.protocol import *
+from cryptography import x509
+from common.cryptography import get_nid_from_cert
 from gi.repository import GLib
 
 class InboxCharacteristic(Characteristic):
@@ -39,6 +41,16 @@ class HeartbeatCharacteristic(Characteristic):
 
     def StopNotify(self):
         self.notifying = False
+
+def load_identity():
+    try:
+        with open("../certs/sink_cert.pem", "rb") as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+            consts.MY_NID = get_nid_from_cert(cert)
+            print(f"[SINK] Identidade carregada do certificado: {consts.MY_NID}")
+    except FileNotFoundError:
+        print("[!] Erro: Certificado do Sink não encontrado em ../certs/")
+        exit(1)
 
 def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)

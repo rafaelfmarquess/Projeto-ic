@@ -1,6 +1,5 @@
-import uuid
 
-MY_NID = str(uuid.uuid4())
+MY_NID = None
 SERVICE_UUID = "d2c8118c-b6dc-4b5b-8d6d-f03fbbcf2201"
 INBOX_SERVICE_UUID = "0b90074d-91d9-4ab6-b3df-ead24a91dba6"
 ADAPTER_PATH = "/org/bluez/hci0"
