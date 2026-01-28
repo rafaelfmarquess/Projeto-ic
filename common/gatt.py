@@ -12,7 +12,7 @@ class Descriptor(dbus.service.Object):
     def __init__(self, bus, index, uuid, flags, characteristic):
         self.path = characteristic.path + '/desc' + str(index)
         self.bus = bus
-        self.uuid = uuid
+        self.uuid = uuid    
         self.flags = flags
         self.chrc = characteristic
         dbus.service.Object.__init__(self, bus, self.path)
@@ -172,5 +172,5 @@ class KeyExchangeCharacteristic(Characteristic):
         return dbus.Array(self.local_pub, signature='y')
 
     def WriteValue(self, value, options):
-        self.callback(bytes(value))
+        self.callback(bytes(value),options  )
         return []

@@ -43,7 +43,10 @@ class InboxCharacteristic(Characteristic):
                     "svc": packet.service, "plt": packet.payload, "mac": None
                 }
                 verifyMac(key, json.dumps(original_data).encode('utf-8'), bytes.fromhex(packet.mac))
-                print(f"[SINK] Mensagem AUTÊNTICA de {packet.src_nid}: {packet.payload}")
+                if packet.service == "Control" and packet.payload == "KEY_CONFIRMATION":
+                    handshake_manager.confirmSession(peer_addr, isInitiator=False, received_pkt=packet)
+                else:
+                    print(f"[SINK] Mensagem AUTÊNTICA de {packet.src_nid}: {packet.payload}")
             except Exception:
                 print(f"[!] AVISO: Mensagem corrompida ou MAC inválido de {packet.src_nid}!")
         else:
@@ -113,8 +116,10 @@ def main():
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
     
-    def on_key_received(value):
-        handshake_manager.handle_incoming_key("NODE_DEVICE", value)
+    def on_key_received(value,options):
+        device_path = options.get('device', '')
+        peer_addr = device_path.split('dev_')[-1].replace('_', ':')
+        handshake_manager.handle_incoming_key(peer_addr, value)
 
     key_chrc = KeyExchangeCharacteristic(bus, 3, service, pub_bytes, on_key_received)
     service.add_characteristic(key_chrc)

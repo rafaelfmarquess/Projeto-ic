@@ -106,6 +106,7 @@ def main():
     if ctrl.establish_uplink():
         if handshake_manager.perform_handshake(ctrl, ctrl.current_uplink):
             
+            handshake_manager.confirmSession(ctrl.current_uplink,isInitiator=True)
             sink_pub_key = handshake_manager._get_and_verify_peer_cert(ctrl.current_uplink)
             
             monitor = HeartbeatMonitor(ctrl, sink_pub_key)
