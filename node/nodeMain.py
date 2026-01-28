@@ -4,6 +4,8 @@ from common.advertiser import Advertiser
 from common.gatt import Application, Service
 from common.consts import *
 from common.protocol import *
+from cryptography import x509
+from common.cryptography import get_nid_from_cert
 from gi.repository import GLib
 
 class HeartbeatMonitor:
@@ -56,12 +58,29 @@ def send_message_to_sink(ctrl, text):
     pkt = Packet(src_nid=MY_NID, dst_nid="SINK", service="Inbox", payload=text)
     raw_bytes = pkt.to_bytes()
     print(f"[NODE] Pacote pronto para enviar: {pkt.payload}")
+    
+def load_node_identity(node_name):
+    try:
+        cert_path = f"../certs/{node_name}_cert.pem"
+        with open(cert_path, "rb") as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+            consts.MY_NID = get_nid_from_cert(cert)
+            print(f"[NODE] Identidade ({node_name}) carregada: {consts.MY_NID}")
+    except FileNotFoundError:
+        print(f"[!] Erro: Certificado {node_name} não encontrado.")
+        exit(1)
+
 
 def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     ctrl = NodeControl()
     adv = Advertiser()
     ft = ForwardingTable()
+    if len(sys.argv) < 2:
+        print("Uso: python3 nodeMain.py [node1|node2|node3]")
+        return
+    node_selection = sys.argv[1]
+    load_node_identity(node_selection)
 
     if ctrl.establish_uplink():
         monitor = HeartbeatMonitor(ctrl)

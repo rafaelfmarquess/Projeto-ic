@@ -53,6 +53,7 @@ def load_identity():
         exit(1)
 
 def main():
+    load_identity()
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
     ft = ForwardingTable()
