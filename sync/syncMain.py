@@ -5,8 +5,25 @@ from common.scanner import ForwardingTable
 from common.consts import *
 from common.protocol import *
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+import common.consts as consts
 from common.cryptography import get_nid_from_cert
+from cryptography.hazmat.primitives import serialization
 from gi.repository import GLib
+
+SyncCert = None
+SyncKey = None
+CaCert = None
+
+class CertificateCharacteristic(Characteristic):
+    def __init__(self, bus, index, service, cert_pem):
+        self.uuid = '99999999-9999-9999-9999-999999999999'
+        self.cert_pem = cert_pem
+        Characteristic.__init__(self, bus, index, self.uuid, ['read'], service)
+
+    def ReadValue(self, options):
+        return dbus.Array(self.cert_pem, signature='y')
 
 class InboxCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
@@ -31,7 +48,9 @@ class HeartbeatCharacteristic(Characteristic):
     def send_heartbeat(self):
         if self.notifying:
             self.counter += 1
-            value = str(self.counter).encode('utf-8')
+            data = str(self.counter).encode('utf-8')
+            signed = MY_KEY.sign(data,ec.ECDSA(hashes.SHA256()))
+            value = data + b'|' + signed
             self.PropertiesChanged(GATT_CHARACTERISTIC_IFACE, {'Value': dbus.Array(value, signature='y')}, [])
             print(f"[SINK] Heartbeat enviado: {self.counter}")
         return True
@@ -42,18 +61,26 @@ class HeartbeatCharacteristic(Characteristic):
     def StopNotify(self):
         self.notifying = False
 
-def load_identity():
+def load_credentials():
+    global MY_CERT, MY_KEY, CA_CERT
     try:
+        with open("../certs/ca_cert.pem", "rb") as f:
+            CA_CERT = x509.load_pem_x509_certificate(f.read())
+        
         with open("../certs/sink_cert.pem", "rb") as f:
-            cert = x509.load_pem_x509_certificate(f.read())
-            consts.MY_NID = get_nid_from_cert(cert)
-            print(f"[SINK] Identidade carregada do certificado: {consts.MY_NID}")
-    except FileNotFoundError:
-        print("[!] Erro: Certificado do Sink não encontrado em ../certs/")
+            MY_CERT = x509.load_pem_x509_certificate(f.read())
+            consts.MY_NID = get_nid_from_cert(MY_CERT)
+        
+        with open("../certs/sink_key.pem", "rb") as f:
+            MY_KEY = serialization.load_pem_private_key(f.read(), password=None)
+            
+        print(f"[SINK] Credenciais carregadas. NID: {consts.MY_NID}")
+    except Exception as e:
+        print(f"[!] Erro ao carregar certificados: {e}")
         exit(1)
 
 def main():
-    load_identity()
+    load_credentials()
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
     ft = ForwardingTable()
@@ -72,7 +99,7 @@ def main():
     adv = Advertiser()
     adv.start_advertising(0, [SERVICE_UUID, INBOX_SERVICE_UUID])
     
-    print(f"[SINK] Ativo. NID: {MY_NID}")
+    print(f"[SINK] Ativo. NID: {consts.MY_NID}")
     GLib.MainLoop().run()
 
 if __name__ == "__main__":
