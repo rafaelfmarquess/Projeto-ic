@@ -1,6 +1,8 @@
 import sys
 import dbus
 import base64
+import random
+import json
 import dbus.mainloop.glib
 from common.scanner import NodeControl, ForwardingTable
 from common.gatt import Characteristic
@@ -49,9 +51,19 @@ class NodeInboxCharacteristic(Characteristic):
             if packet.dst_nid == consts.MY_NID:
                 if packet.service == "DTLS":
                     raw_dtls = base64.b64decode(packet.payload)
-                    _, resp = dtls.handle_incoming(raw_dtls)
+                    clear_text = dtls.handle_incoming(raw_dtls)
+                    resp = dtls.get_outgoing_network_data()
                     if resp:
                         self._send_dtls_to_sink(resp)
+                        
+                    if clear_text:
+                        try:
+                            app_data = json.loads(clear_text.decode('utf-8'))
+                            port = app_data.get("port")
+                            data = app_data.get("data")
+                            print(f"[APP] Recebido na Porta {port}: {data}")
+                        except:
+                            print(f"[DTLS] Recebido (Raw): {clear_text.decode()}")
                 else:
                     self._process_locally(packet, peer_addr)
             elif packet.dst_nid == "SINK":
@@ -94,6 +106,27 @@ class NodeInboxCharacteristic(Characteristic):
         payload = base64.b64encode(dtls_data).decode()
         pkt = Packet(consts.MY_NID, "SINK", "DTLS", payload)
         self._forward_packet(pkt, self.ctrl.current_uplink)
+
+    def send_app_data(self, message):
+        global dtls        
+        if not dtls or not dtls.is_established:
+            print("[!] Erro: Canal DTLS ainda não está estabelecido. Handshake em curso?")
+            return
+        
+        app_packet = {
+            "port": random.randint(1024, 65535),
+            "data": message
+        }
+        json_payload = json.dumps(app_packet)
+        
+        dtls_payload = dtls.encrypt(json_payload)
+        self._send_dtls_to_sink(dtls_payload)
+        
+        if dtls_payload:
+            self._send_dtls_to_sink(dtls_payload)
+            print(f"[*] Mensagem enviada com sucesso para o Sink.")
+        else:
+            print("[!] Erro ao cifrar mensagem com DTLS.")
 
 class HeartbeatMonitor:
     def __init__(self, node_control, sink_pub_key,HeartB_FW):

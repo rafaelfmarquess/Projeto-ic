@@ -65,25 +65,46 @@ class InboxCharacteristic(Characteristic):
         
         raw_dtls = base64.b64decode(packet.payload)
         clear_text = dtls_sessions[nid].handle_incoming(raw_dtls) 
-        resp = dtls_sessions[nid].get_outgoing_network_data()
-        if resp:
-            pkt = Packet(consts.MY_NID, nid, "DTLS", base64.b64encode(resp).decode())
-            key = handshake_manager.session_keys.get(last_hop_mac)
-            nonce = handshake_manager.get_next_tx_nonce(last_hop_mac)
-            handshake_manager._write_to_remote_inbox(last_hop_mac, pkt.to_bytes(key, nonce))
+        
+        resp_handshake = dtls_sessions[nid].get_outgoing_network_data()
+        if resp_handshake:
+            self._send_raw_dtls(nid, last_hop_mac, resp_handshake)
             
         if clear_text:
-            print(f"--- MENSAGEM SEGURA (DTLS) RECEBIDA ---")
-            print(f"Origem: {nid}")
-            print(f"Conteúdo: {clear_text.decode('utf-8')}")
-            print(f"---------------------------------------")
+            try:
+                app_data = json.loads(clear_text.decode('utf-8'))
+                port = app_data.get("port")
+                message = app_data.get("data")
+                
+                print(f"--- MENSAGEM DTLS (NID: {nid}, PORT: {port}) ---")
+                print(f"Conteúdo: {message}")
+                
+                self.send_downlink_msg(nid, last_hop_mac, port, f"ACK Port {port}")
+                
+                if self.ui_ref:
+                    self.ui_ref.add_log(nid, f"P:{port} - {message}")
+            except Exception as e:
+                print(f"[SINK] Erro ao processar payload da app: {e}")
 
+    def send_downlink_msg(self, target_nid, last_hop_mac, port, message):
+        payload = json.dumps({"port": port, "data": message})
+        dtls_cipher = dtls_sessions[target_nid].encrypt(payload)
+        if dtls_cipher:
+            self._send_raw_dtls(target_nid, last_hop_mac, dtls_cipher)
+
+    def _send_raw_dtls(self, nid, mac, data):
+        pkt = Packet(consts.MY_NID, nid, "DTLS", base64.b64encode(data).decode())
+        key = handshake_manager.session_keys.get(mac)
+        nonce = handshake_manager.get_next_tx_nonce(mac)
+        handshake_manager._write_to_remote_inbox(mac, pkt.to_bytes(key, nonce))
+        
 class HeartbeatCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
         self.uuid = '87654321-4321-4321-4321-210987654321'
         Characteristic.__init__(self, bus, index, self.uuid, ['notify'], service)
         self.counter = 0
         self.notifying = False
+        self.silenced_macs = set()
 
     def send_heartbeat(self):
         if self.notifying:

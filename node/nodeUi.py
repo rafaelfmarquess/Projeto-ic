@@ -1,6 +1,7 @@
 from common.ui import BaseUI
 import common.consts as consts
 
+
 class NodeUI(BaseUI):
     def __init__(self, ctrl, handshake_mngr, inbox, monitor, ft):
         super().__init__()
@@ -28,5 +29,9 @@ class NodeUI(BaseUI):
             msg = input("Digite a mensagem: ")
             if hasattr(self.inbox, 'send_app_data'):
                 self.inbox.send_app_data(msg)
+        elif choice == '2':
+            print("[*] A pesquisar vizinhos...")
+            self.ctrl.scan_network() 
+            input("\nPressione Enter para voltar...")
         elif choice == 'q':
             self.running = False
