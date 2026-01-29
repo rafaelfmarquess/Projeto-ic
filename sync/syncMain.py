@@ -1,5 +1,6 @@
 import json
 import base64
+import syncUi
 import dbus.mainloop.glib
 from common.gatt import (
     Application, Service, Characteristic, 
@@ -61,8 +62,10 @@ class InboxCharacteristic(Characteristic):
         nid = packet.src_nid
         if nid not in dtls_sessions:
             dtls_sessions[nid] = DTLSHandler(SINK_CERT_PEM, SINK_KEY_PEM, CA_CERT_PEM, is_server=True)
+        
         raw_dtls = base64.b64decode(packet.payload)
-        clear_text, resp = dtls_sessions[nid].handle_incoming(raw_dtls)        
+        clear_text = dtls_sessions[nid].handle_incoming(raw_dtls) 
+        resp = dtls_sessions[nid].get_outgoing_network_data()
         if resp:
             pkt = Packet(consts.MY_NID, nid, "DTLS", base64.b64encode(resp).decode())
             key = handshake_manager.session_keys.get(last_hop_mac)
@@ -70,7 +73,10 @@ class InboxCharacteristic(Characteristic):
             handshake_manager._write_to_remote_inbox(last_hop_mac, pkt.to_bytes(key, nonce))
             
         if clear_text:
-            print(f"[SINK] DADOS SEGUROS E2E de {nid}: {clear_text.decode()}")
+            print(f"--- MENSAGEM SEGURA (DTLS) RECEBIDA ---")
+            print(f"Origem: {nid}")
+            print(f"Conteúdo: {clear_text.decode('utf-8')}")
+            print(f"---------------------------------------")
 
 class HeartbeatCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
@@ -94,24 +100,6 @@ class HeartbeatCharacteristic(Characteristic):
 
     def StopNotify(self):
         self.notifying = False
-
-def load_credentials():
-    global MY_CERT, MY_KEY, CA_CERT
-    try:
-        with open("../certs/ca_cert.pem", "rb") as f:
-            CA_CERT = x509.load_pem_x509_certificate(f.read())
-        
-        with open("../certs/sink_cert.pem", "rb") as f:
-            MY_CERT = x509.load_pem_x509_certificate(f.read())
-            consts.MY_NID = get_nid_from_cert(MY_CERT)
-        
-        with open("../certs/sink_key.pem", "rb") as f:
-            MY_KEY = serialization.load_pem_private_key(f.read(), password=None)
-            
-        print(f"[SINK] Credenciais carregadas. NID: {consts.MY_NID}")
-    except Exception as e:
-        print(f"[!] Erro ao carregar certificados: {e}")
-        exit(1)
 
 def load_credentials():
     global MY_CERT, MY_KEY, CA_CERT, CA_CERT_PEM, SINK_CERT_PEM, SINK_KEY_PEM
@@ -172,6 +160,14 @@ def main():
     manager.RegisterApplication(app.path, {}, reply_handler=None, error_handler=None)
 
     GLib.timeout_add_seconds(5, service.get_characteristics()[3].send_heartbeat)
+    
+    hb_chrc = service.get_characteristics()[3] # Heartbeat é a 4ª característica
+    ui = syncUi.SinkUI(handshake_manager, ft, hb_chrc)
+    
+    inbox_chrc = service.get_characteristics()[2] # Inbox é a 3ª característica
+    inbox_chrc.ui_ref = ui
+    
+    ui.start()
     
     adv = Advertiser()
     adv.start_advertising(0, [SERVICE_UUID, INBOX_SERVICE_UUID])

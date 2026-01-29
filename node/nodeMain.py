@@ -10,6 +10,7 @@ from common.consts import *
 import common.consts as consts
 from common.protocol import Packet
 from common.Dtls import DTLSHandler
+import nodeUi
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -28,6 +29,7 @@ forwarding_table = ForwardingTable()
 class NodeInboxCharacteristic(Characteristic):
     def __init__(self, bus, index, service,ctrl):
         self.ctrl = ctrl
+        self.routed_count = 0
         Characteristic.__init__(self, bus, index, CHAT_MSG_UUID, ['write'], service)
 
     def WriteValue(self, value, options):
@@ -67,6 +69,8 @@ class NodeInboxCharacteristic(Characteristic):
     def _forward_packet(self, packet, target_mac):
         target_key = handshake_manager.session_keys.get(target_mac)
         if target_key:
+            if target_mac == self.ctrl.current_uplink:
+                self.routed_count += 1
             new_nonce = handshake_manager.get_next_tx_nonce(target_mac)
             data = packet.to_bytes(target_key, new_nonce)
             handshake_manager._write_to_remote_inbox(target_mac, data)
@@ -76,6 +80,15 @@ class NodeInboxCharacteristic(Characteristic):
             handshake_manager.confirmSession(peer_addr, isInitiator=True, received_pkt=packet)
         else:
             print(f"[NODE] Mensagem local recebida de {packet.src_nid}: {packet.payload}")
+            
+    def _start_dtls_handshake(self):
+        global dtls
+        print("[DTLS] A iniciar handshake ponta-a-ponta...")
+        dtls.do_handshake()
+        hello_data = dtls.get_outgoing_network_data()
+        
+        if hello_data:
+            self._send_dtls_to_sink(hello_data)
             
     def _send_dtls_to_sink(self, dtls_data):
         payload = base64.b64encode(dtls_data).decode()
@@ -217,12 +230,16 @@ def main():
                                                    opts.get('device','').split('dev_')[-1].replace('_', ':'), val))
             service.add_characteristic(key_chrc)
             
-            service.add_characteristic(NodeInboxCharacteristic(bus, 2, service,ctrl))
+            inbox = NodeInboxCharacteristic(bus, 2, service,ctrl)
+            service.add_characteristic(inbox)
             
             app.add_service(service)
-            
+            GLib.idle_add(inbox._start_dtls_handshake)
             manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH), GATT_MANAGER_IFACE)
             manager.RegisterApplication(app.path, {}, reply_handler=None, error_handler=None)
+            
+            ui = nodeUi(ctrl, handshake_manager, inbox, monitor, forwarding_table)
+            ui.start()
             
             adv.start_advertising(ctrl.my_hop_count, [SERVICE_UUID])
             print(f"[NODE] Setup concluído. À espera de confirmação mútua e dados.")
