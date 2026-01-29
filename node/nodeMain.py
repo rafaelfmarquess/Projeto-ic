@@ -1,5 +1,6 @@
 import sys
 import dbus
+import base64
 import dbus.mainloop.glib
 from common.scanner import NodeControl, ForwardingTable
 from common.gatt import Characteristic
@@ -8,6 +9,7 @@ from common.gatt import Application, Service, CertificateCharacteristic, KeyExch
 from common.consts import *
 import common.consts as consts
 from common.protocol import Packet
+from common.Dtls import DTLSHandler
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -19,6 +21,7 @@ MY_CERT = None
 MY_KEY = None
 CA_CERT = None
 handshake_manager = None
+dtls = None
 
 forwarding_table = ForwardingTable()
 
@@ -42,7 +45,13 @@ class NodeInboxCharacteristic(Characteristic):
             forwarding_table.update_route(packet.src_nid, peer_addr)
 
             if packet.dst_nid == consts.MY_NID:
-                self._process_locally(packet, peer_addr)
+                if packet.service == "DTLS":
+                    raw_dtls = base64.b64decode(packet.payload)
+                    _, resp = dtls.handle_incoming(raw_dtls)
+                    if resp:
+                        self._send_dtls_to_sink(resp)
+                else:
+                    self._process_locally(packet, peer_addr)
             elif packet.dst_nid == "SINK":
                 print(f"[*] A reencaminhar pacote de {packet.src_nid} para o SINK...")
                 self._forward_packet(packet, self.ctrl.current_uplink)
@@ -67,6 +76,11 @@ class NodeInboxCharacteristic(Characteristic):
             handshake_manager.confirmSession(peer_addr, isInitiator=True, received_pkt=packet)
         else:
             print(f"[NODE] Mensagem local recebida de {packet.src_nid}: {packet.payload}")
+            
+    def _send_dtls_to_sink(self, dtls_data):
+        payload = base64.b64encode(dtls_data).decode()
+        pkt = Packet(consts.MY_NID, "SINK", "DTLS", payload)
+        self._forward_packet(pkt, self.ctrl.current_uplink)
 
 class HeartbeatMonitor:
     def __init__(self, node_control, sink_pub_key,HeartB_FW):
@@ -153,7 +167,7 @@ def load_node_credentials(node_name):
         
 
 def main():
-    global handshake_manager
+    global handshake_manager,dtls
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     
     if len(sys.argv) < 2:
@@ -161,6 +175,13 @@ def main():
         return
     
     load_node_credentials(sys.argv[1])
+    
+    with open("../certs/ca_cert.pem", "rb") as f: ca_pem = f.read()
+    with open(f"../certs/{sys.argv[1]}_cert.pem", "rb") as f: cert_pem = f.read()
+    with open(f"../certs/{sys.argv[1]}_key.pem", "rb") as f: key_pem = f.read()
+    
+    dtls = DTLSHandler(cert_pem, key_pem, ca_pem, is_server=False)
+
     handshake_manager = HandshakeManager(CA_CERT, MY_CERT, MY_KEY)
     
     ctrl = NodeControl()

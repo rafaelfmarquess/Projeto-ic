@@ -1,4 +1,5 @@
 import json
+import base64
 import dbus.mainloop.glib
 from common.gatt import (
     Application, Service, Characteristic, 
@@ -8,19 +9,23 @@ from common.advertiser import Advertiser
 from common.scanner import ForwardingTable
 from common.consts import *
 from common.protocol import Packet
+from common.Dtls import DTLSHandler
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 import common.consts as consts
 from common.handshake import HandshakeManager
 from common.cryptography import get_nid_from_cert, generate_dh_keys
-from common.cryptography import verifyMac
 from gi.repository import GLib
 
 MY_CERT = None
 MY_KEY = None
 CA_CERT = None
+CA_CERT_PEM = None
+SINK_CERT_PEM = None
+SINK_KEY_PEM = None
 handshake_manager = None
+dtls_sessions = {}
 
 class InboxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, ft):
@@ -36,10 +41,14 @@ class InboxCharacteristic(Characteristic):
         packet = Packet.from_bytes(bytes(value), key)
         
         if packet:
+            self.ft.update_route(packet.src_nid, peer_addr)
+            
             if not handshake_manager.is_nonce_valid(peer_addr, bytes.fromhex(packet.nonce)):
                 print(f"[!] REPLAY DETECTADO de {peer_addr}. Mensagem descartada.")
                 return []
-            if packet.service == "Control" and packet.payload == "KEY_CONFIRM_GCM":
+            if packet.service == "DTLS":
+                self._handle_dtls_e2e(packet, peer_addr)
+            elif packet.service == "Control" and packet.payload == "KEY_CONFIRM_GCM":
                 handshake_manager.confirmSession(peer_addr, isInitiator=False, received_pkt=packet)
             else:
                 print(f"[SINK] Mensagem CIFRADA recebida de {packet.src_nid}: {packet.payload}")
@@ -47,6 +56,21 @@ class InboxCharacteristic(Characteristic):
             print(f"[!] AVISO: Falha na decifragem ou TAG inválida de {peer_addr}. Mensagem descartada.")
         
         return []
+    
+    def _handle_dtls_e2e(self, packet, last_hop_mac):
+        nid = packet.src_nid
+        if nid not in dtls_sessions:
+            dtls_sessions[nid] = DTLSHandler(SINK_CERT_PEM, SINK_KEY_PEM, CA_CERT_PEM, is_server=True)
+        raw_dtls = base64.b64decode(packet.payload)
+        clear_text, resp = dtls_sessions[nid].handle_incoming(raw_dtls)        
+        if resp:
+            pkt = Packet(consts.MY_NID, nid, "DTLS", base64.b64encode(resp).decode())
+            key = handshake_manager.session_keys.get(last_hop_mac)
+            nonce = handshake_manager.get_next_tx_nonce(last_hop_mac)
+            handshake_manager._write_to_remote_inbox(last_hop_mac, pkt.to_bytes(key, nonce))
+            
+        if clear_text:
+            print(f"[SINK] DADOS SEGUROS E2E de {nid}: {clear_text.decode()}")
 
 class HeartbeatCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
@@ -83,6 +107,27 @@ def load_credentials():
         
         with open("../certs/sink_key.pem", "rb") as f:
             MY_KEY = serialization.load_pem_private_key(f.read(), password=None)
+            
+        print(f"[SINK] Credenciais carregadas. NID: {consts.MY_NID}")
+    except Exception as e:
+        print(f"[!] Erro ao carregar certificados: {e}")
+        exit(1)
+
+def load_credentials():
+    global MY_CERT, MY_KEY, CA_CERT, CA_CERT_PEM, SINK_CERT_PEM, SINK_KEY_PEM
+    try:
+        with open("../certs/ca_cert.pem", "rb") as f:
+            CA_CERT_PEM = f.read()
+            CA_CERT = x509.load_pem_x509_certificate(CA_CERT_PEM)
+        
+        with open("../certs/sink_cert.pem", "rb") as f:
+            SINK_CERT_PEM = f.read()
+            MY_CERT = x509.load_pem_x509_certificate(SINK_CERT_PEM)
+            consts.MY_NID = get_nid_from_cert(MY_CERT)
+        
+        with open("../certs/sink_key.pem", "rb") as f:
+            SINK_KEY_PEM = f.read()
+            MY_KEY = serialization.load_pem_private_key(SINK_KEY_PEM, password=None)
             
         print(f"[SINK] Credenciais carregadas. NID: {consts.MY_NID}")
     except Exception as e:
