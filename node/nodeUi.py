@@ -33,8 +33,27 @@ class NodeUI(BaseUI):
             if hasattr(self.inbox, 'send_app_data'):
                 self.inbox.send_app_data(msg)
         elif choice == '2':
-            print("[*] A pesquisar vizinhos...")
-            self.ctrl.scan_network() 
+            print("\n[*] Pesquisando vizinhos próximos...")
+            devices = self.ctrl.scan_network()
+            
+            if not devices:
+                print("[!] Nenhum dispositivo encontrado.")
+                input("Pressione Enter...")
+                return
+
+            print("\nID  | ENDEREÇO MAC       | HOPS ATÉ AO SINK")
+            print("-" * 45)
+            for idx, dev in enumerate(devices):
+                print(f"{idx:<3} | {dev['addr']} | {dev['hops']}")
+            
+            sel = input("\nEscolha o ID para conectar (ou 'c' para cancelar): ")
+            if sel.isdigit() and int(sel) < len(devices):
+                target = devices[int(sel)]
+                print(f"[*] Tentando ligar a {target['addr']}...")
+                if self.ctrl.establish_uplink(target['addr'], target['hops']):
+                    print("[+] Uplink estabelecido com sucesso!")
+                else:
+                    print("[!] Falha ao conectar.")
             input("\nPressione Enter para voltar...")
         elif choice == '3':
             if hasattr(self.inbox, 'request_network_nodes'):

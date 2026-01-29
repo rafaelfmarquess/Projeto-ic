@@ -315,7 +315,7 @@ def main():
             manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH), GATT_MANAGER_IFACE)
             manager.RegisterApplication(app.path, {}, reply_handler=None, error_handler=None)
             
-            ui = nodeUi(ctrl, handshake_manager, inbox, monitor, forwarding_table)
+            ui = nodeUi.NodeUI(ctrl, handshake_manager, inbox, monitor, forwarding_table)
             ui.start()
             
             adv.start_advertising(ctrl.my_hop_count, [SERVICE_UUID])

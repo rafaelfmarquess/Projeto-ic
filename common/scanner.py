@@ -14,6 +14,7 @@ class NodeControl:
 
     def scan_network(self):
         print(f"[*] A procurar potenciais uplinks (SIC {SERVICE_UUID})...")
+        found_devices = []
         try:
             self.adapter.SetDiscoveryFilter({'UUIDs': [SERVICE_UUID]})
             self.adapter.StartDiscovery()
@@ -21,12 +22,9 @@ class NodeControl:
             self.adapter.StopDiscovery()
         except Exception as e:
             print(f"[!] Erro no scan: {e}")
-            return None
+            return []
 
         objects = self.mngr.GetManagedObjects()
-        best_addr = None
-        min_hops = float('inf')
-
         for path, interfaces in objects.items():
             if "org.bluez.Device1" in interfaces:
                 props = interfaces["org.bluez.Device1"]
@@ -36,30 +34,26 @@ class NodeControl:
                     addr = props.get("Address")
                     service_data = props.get("ServiceData", {})
                     hops = -1
-                    
                     if SERVICE_UUID in service_data:
                         hops = int.from_bytes(service_data[SERVICE_UUID], "big")
                     
-                    print(f" -> Dispositivo: {addr}, Hops detectados: {hops}")
+                    found_devices.append({'addr': addr, 'hops': hops})
 
-                    if 0 <= hops < min_hops:
-                        min_hops = hops
-                        best_addr = addr
+        return found_devices
 
-        if best_addr:
-            print(f"[+] Melhor uplink encontrado: {best_addr} com {min_hops} hops.")
-            return best_addr, min_hops
-        return None, -1
+    def establish_uplink(self, manual_addr=None, manual_hops=None):
+        if manual_addr is not None:
+            target_addr, target_hops = manual_addr, manual_hops
+        else:
+            devices = self.scan_network()
+            if not devices: return False
+            best = min(devices, key=lambda d: d['hops'] if d['hops'] >= 0 else float('inf'))
+            target_addr, target_hops = best['addr'], best['hops']
 
-    def establish_uplink(self):
-        target_addr, target_hops = self.scan_network()
-        if target_addr:
-            success = self.connect_uplink(target_addr)
-            if success:
-                self.my_hop_count = target_hops + 1
-                self.current_uplink = target_addr
-                print(f"[*] Novo estado: O meu hop_count é {self.my_hop_count}")
-                return True
+        if self.connect_uplink(target_addr):
+            self.my_hop_count = target_hops + 1
+            self.current_uplink = target_addr
+            return True
         return False
 
     def connect_uplink(self, mac_address):
