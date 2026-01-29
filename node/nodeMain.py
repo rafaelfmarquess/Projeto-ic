@@ -131,9 +131,7 @@ class NodeInboxCharacteristic(Characteristic):
         }
         json_payload = json.dumps(app_packet)
         
-        dtls_payload = dtls.encrypt(json_payload)
-        self._send_dtls_to_sink(dtls_payload)
-        
+        dtls_payload = dtls.encrypt(json_payload)        
         if dtls_payload:
             self._send_dtls_to_sink(dtls_payload)
             print(f"[*] Mensagem enviada com sucesso para o Sink.")
@@ -166,7 +164,7 @@ class NodeInboxCharacteristic(Characteristic):
     def fetch_mailbox(self):
         payload = {
             "port": random.randint(1024, 65535),
-            "type": "GET_MSGS"
+            "type": "GET_MESSAGES"
         }
         dtls_payload = dtls.encrypt(json.dumps(payload))
         self._send_dtls_to_sink(dtls_payload)
