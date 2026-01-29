@@ -22,6 +22,9 @@ class NodeUI(BaseUI):
         print("-" * 30)
         print("1. Enviar Mensagem Segura (DTLS) ao Sink")
         print("2. Procurar novos vizinhos (Scan)")
+        print("3. Lista de nós na rede")
+        print("4. Enviar mensagem para outro Nó (via Sink)")
+        print("5. Verificar a minha caixa de correio no Sink")
         print("q. Sair")
 
     def handle_input(self, choice):
@@ -33,5 +36,15 @@ class NodeUI(BaseUI):
             print("[*] A pesquisar vizinhos...")
             self.ctrl.scan_network() 
             input("\nPressione Enter para voltar...")
+        elif choice == '3':
+            if hasattr(self.inbox, 'request_network_nodes'):
+                self.inbox.request_network_nodes()
+            input("\nAguardando resposta... Pressione Enter.")
+        elif choice == '4':
+            dest = input("NID do destinatário: ")
+            msg = input("Mensagem: ")
+            self.inbox.send_to_node(dest, msg)
+        elif choice == '5':
+            self.inbox.fetch_mailbox()
         elif choice == 'q':
             self.running = False

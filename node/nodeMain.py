@@ -59,9 +59,21 @@ class NodeInboxCharacteristic(Characteristic):
                     if clear_text:
                         try:
                             app_data = json.loads(clear_text.decode('utf-8'))
-                            port = app_data.get("port")
-                            data = app_data.get("data")
-                            print(f"[APP] Recebido na Porta {port}: {data}")
+                            if app_data.get("type") == "MAILBOX_CONTENT":
+                                msgs = app_data.get("messages", [])
+                                if not msgs:
+                                    print("[MAILBOX] Não tens mensagens novas.")
+                                else:
+                                    print(f"\n--- TENS {len(msgs)} MENSAGENS NOVAS ---")
+                                    for m in msgs:
+                                        print(f"De {m['from']}: {m['msg']}")
+                            elif app_data.get("type") == "NODE_LIST":
+                                nodes = app_data.get("nodes", [])
+                                print(f"\n[REDE] Nós ativos no sistema: {', '.join(nodes)}")
+                            else:
+                                port = app_data.get("port")
+                                data = app_data.get("data")
+                                print(f"[APP] Recebido na Porta {port}: {data}")
                         except:
                             print(f"[DTLS] Recebido (Raw): {clear_text.decode()}")
                 else:
@@ -128,6 +140,38 @@ class NodeInboxCharacteristic(Characteristic):
         else:
             print("[!] Erro ao cifrar mensagem com DTLS.")
 
+    def request_network_nodes(self):
+        if not dtls or not dtls.is_established:
+            print("[!] Erro: Canal DTLS não estabelecido.")
+            return
+
+        pedido = {
+            "port": random.randint(1024, 65535),
+            "type": "LIST_NODES"
+        }
+        dtls_payload = dtls.encrypt(json.dumps(pedido))
+        self._send_dtls_to_sink(dtls_payload)
+        print("[*] Pedido de listagem enviado ao Sink...")
+    def send_to_node(self, dest_nid, message):
+        payload = {
+            "port": random.randint(1024, 65535),
+            "type": "SEND_TO_NODE",
+            "dst_nid": dest_nid,
+            "data": message
+        }
+        dtls_payload = dtls.encrypt(json.dumps(payload))
+        self._send_dtls_to_sink(dtls_payload)
+        print(f"[*] Mensagem enviada para o Sink com destino a {dest_nid}")
+
+    def fetch_mailbox(self):
+        payload = {
+            "port": random.randint(1024, 65535),
+            "type": "GET_MSGS"
+        }
+        dtls_payload = dtls.encrypt(json.dumps(payload))
+        self._send_dtls_to_sink(dtls_payload)
+        print("[*] A consultar mensagens pendentes no Sink...")
+    
 class HeartbeatMonitor:
     def __init__(self, node_control, sink_pub_key,HeartB_FW):
         self.missed_count = 0

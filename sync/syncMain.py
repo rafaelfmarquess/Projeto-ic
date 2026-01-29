@@ -27,6 +27,7 @@ SINK_CERT_PEM = None
 SINK_KEY_PEM = None
 handshake_manager = None
 dtls_sessions = {}
+messages = {}
 
 class InboxCharacteristic(Characteristic):
     def __init__(self, bus, index, service, ft):
@@ -75,12 +76,39 @@ class InboxCharacteristic(Characteristic):
                 app_data = json.loads(clear_text.decode('utf-8'))
                 port = app_data.get("port")
                 message = app_data.get("data")
-                
-                print(f"--- MENSAGEM DTLS (NID: {nid}, PORT: {port}) ---")
-                print(f"Conteúdo: {message}")
-                
-                self.send_downlink_msg(nid, last_hop_mac, port, f"ACK Port {port}")
-                
+                req_type = app_data.get("type")
+                if req_type == "SEND_TO_NODE":
+                    dest_nid = app_data.get("dst_nid")
+                    msg_content = app_data.get("data")
+                    
+                    if dest_nid not in messages:
+                        messages[dest_nid] = []
+                    
+                    messages[dest_nid].append({"from": packet.src_nid, "msg": msg_content})
+                    print(f"[MAILBOX] Mensagem guardada de {packet.src_nid} para {dest_nid}")
+                    
+                    self.send_downlink_msg(packet.src_nid, last_hop_mac, port, "Mensagem entregue ao Sink.")
+
+                elif req_type == "GET_MESSAGES":
+                    pending = messages.pop(packet.src_nid, [])
+                    resposta = {
+                        "port": port,
+                        "type": "MAILBOX_CONTENT",
+                        "messages": pending
+                    }
+                    self.send_downlink_msg(packet.src_nid, last_hop_mac, port, json.dumps(resposta))
+                elif req_type == "LIST_NODES":
+                    nids_na_rede = list(self.ft.table.keys())
+                    resposta = {
+                        "port": port,
+                        "type": "NODE_LIST",
+                        "nodes": nids_na_rede
+                    }
+                    self.send_downlink_msg(nid, last_hop_mac, port, json.dumps(resposta))
+                else:
+                    print(f"--- MENSAGEM DTLS (NID: {nid}, PORT: {port}) ---")
+                    print(f"Conteúdo: {message}")
+                    self.send_downlink_msg(nid, last_hop_mac, port, f"ACK Port {port}")
                 if self.ui_ref:
                     self.ui_ref.add_log(nid, f"P:{port} - {message}")
             except Exception as e:
