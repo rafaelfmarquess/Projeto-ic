@@ -20,8 +20,11 @@ MY_KEY = None
 CA_CERT = None
 handshake_manager = None
 
+forwarding_table = ForwardingTable()
+
 class NodeInboxCharacteristic(Characteristic):
-    def __init__(self, bus, index, service):
+    def __init__(self, bus, index, service,ctrl):
+        self.ctrl = ctrl
         Characteristic.__init__(self, bus, index, CHAT_MSG_UUID, ['write'], service)
 
     def WriteValue(self, value, options):
@@ -29,27 +32,49 @@ class NodeInboxCharacteristic(Characteristic):
         peer_addr = sender_path.split('dev_')[-1].replace('_', ':')
         
         key = handshake_manager.session_keys.get(peer_addr)
-        
         packet = Packet.from_bytes(bytes(value), key)
         
         if packet:
             if not handshake_manager.is_nonce_valid(peer_addr, bytes.fromhex(packet.nonce)):
                 print(f"[!] REPLAY DETECTADO de {peer_addr}. Mensagem descartada.")
                 return []
-            if packet.service == "Control" and packet.payload == "KEY_CONFIRM_ACK":
-                handshake_manager.confirmSession(peer_addr, isInitiator=True, received_pkt=packet)
+    
+            forwarding_table.update_route(packet.src_nid, peer_addr)
+
+            if packet.dst_nid == consts.MY_NID:
+                self._process_locally(packet, peer_addr)
+            elif packet.dst_nid == "SINK":
+                print(f"[*] A reencaminhar pacote de {packet.src_nid} para o SINK...")
+                self._forward_packet(packet, self.ctrl.current_uplink)
             else:
-                print(f"[NODE] Mensagem cifrada recebida de {packet.src_nid}: {packet.payload}")
-        else:
-            print(f"[!] Erro: Falha na integridade (Tag GCM inválida) de {peer_addr}")
-        
+                target_mac = forwarding_table.table.get(packet.dst_nid)
+                if target_mac:
+                    print(f"[*] A reencaminhar pacote para downlink {packet.dst_nid} via {target_mac}")
+                    self._forward_packet(packet, target_mac)
+                else:
+                    print(f"[!] Rota desconhecida para {packet.dst_nid}. Descartado.")
         return []
+    
+    def _forward_packet(self, packet, target_mac):
+        target_key = handshake_manager.session_keys.get(target_mac)
+        if target_key:
+            new_nonce = handshake_manager.get_next_tx_nonce(target_mac)
+            data = packet.to_bytes(target_key, new_nonce)
+            handshake_manager._write_to_remote_inbox(target_mac, data)
+
+    def _process_locally(self, packet, peer_addr):
+        if packet.service == "Control" and packet.payload == "KEY_CONFIRM_ACK":
+            handshake_manager.confirmSession(peer_addr, isInitiator=True, received_pkt=packet)
+        else:
+            print(f"[NODE] Mensagem local recebida de {packet.src_nid}: {packet.payload}")
 
 class HeartbeatMonitor:
-    def __init__(self, node_control, sink_pub_key):
+    def __init__(self, node_control, sink_pub_key,HeartB_FW):
         self.missed_count = 0
         self.ctrl = node_control
         self.sink_pub_key = sink_pub_key 
+        self.HeartB_FW = HeartB_FW
+        
 
     def heartbeat_received(self, value):
         try:
@@ -62,6 +87,9 @@ class HeartbeatMonitor:
             self.sink_pub_key.verify(signature, counter_data, ec.ECDSA(hashes.SHA256()))
             print(f"[NODE] Heartbeat verificado com sucesso: {counter_data.decode()}")
             self.missed_count = 0
+            if self.HeartB_FW:
+                print(f"[NODE] Heartbeat verificado. A propagar para downlinks...")
+                self.HeartB_FW.forward_heartbeat(value)
         except Exception as e:
             print(f"[!] Erro na verificação do Heartbeat (Possível intruso): {e}")
 
@@ -72,6 +100,14 @@ class HeartbeatMonitor:
             self.ctrl.destroy_all_connections() 
             return False
         return True
+
+class NodeHeartbeatCharacteristic(Characteristic):
+    def __init__(self, bus, index, service):
+        self.uuid = '87654321-4321-4321-4321-210987654321'
+        Characteristic.__init__(self, bus, index, self.uuid, ['notify'], service)
+
+    def forward_heartbeat(self, value):
+        self.PropertiesChanged(GATT_CHARACTERISTIC_IFACE, {'Value': dbus.Array(value, signature='y')}, [])
 
 def setup_heartbeat_listener(ctrl, monitor):
     bus = dbus.SystemBus()
@@ -114,6 +150,7 @@ def load_node_credentials(node_name):
     except Exception as e:
         print(f"[!] Erro ao carregar certificados: {e}")
         exit(1)
+        
 
 def main():
     global handshake_manager
@@ -134,18 +171,21 @@ def main():
             
             handshake_manager.confirmSession(ctrl.current_uplink, isInitiator=True)
             
-            sink_pub_key = handshake_manager._get_and_verify_peer_cert(ctrl.current_uplink)
-            monitor = HeartbeatMonitor(ctrl, sink_pub_key)
-            GLib.timeout_add_seconds(5, monitor.check_liveness)
-            setup_heartbeat_listener(ctrl, monitor)
-
             bus = dbus.SystemBus()
             app = Application(bus)
             service = Service(bus, '/org/bluez/node/service', 0, SERVICE_UUID, True)
             
-            cert_pem = MY_CERT.public_bytes(serialization.Encoding.PEM)
-            service.add_characteristic(CertificateCharacteristic(bus, 0, service, cert_pem))
+            sink_pub_key = handshake_manager._get_and_verify_peer_cert(ctrl.current_uplink)
+            HeartB_FW = NodeHeartbeatCharacteristic(bus, 3, service)
+            service.add_characteristic(HeartB_FW)
             
+            monitor = HeartbeatMonitor(ctrl, sink_pub_key,HeartB_FW)
+            GLib.timeout_add_seconds(5, monitor.check_liveness)
+            setup_heartbeat_listener(ctrl, monitor)
+                       
+            cert_pem = MY_CERT.public_bytes(serialization.Encoding.PEM)
+            service.add_characteristic(CertificateCharacteristic(bus, 0, service, cert_pem))   
+                  
             _, local_dh_pub = generate_dh_keys()
             dh_pub_bytes = local_dh_pub.public_bytes(
                 encoding=serialization.Encoding.PEM,
@@ -156,7 +196,7 @@ def main():
                                                    opts.get('device','').split('dev_')[-1].replace('_', ':'), val))
             service.add_characteristic(key_chrc)
             
-            service.add_characteristic(NodeInboxCharacteristic(bus, 2, service))
+            service.add_characteristic(NodeInboxCharacteristic(bus, 2, service,ctrl))
             
             app.add_service(service)
             

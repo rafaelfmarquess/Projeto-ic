@@ -1,7 +1,6 @@
 import json
 import base64
 from common.consts import MY_NID
-from common.cryptography import MAC
 from common.cryptography import encrypt_payload, decrypt_payload
 
 class Packet:
