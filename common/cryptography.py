@@ -1,10 +1,12 @@
 import datetime
+import os
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hmac 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 def verify_certificate(cert_to_verify, ca_cert):
     try:
@@ -50,13 +52,14 @@ def derive_session_key(private_key, peer_public_key_bytes):
     
     return derived_key
 
-def MAC(key,data):
-    h = hmac.HMAC(key,hashes.SHA256())
-    h.update(data)
-    return h.finalize()
 
-def verifyMac(key,data,mac):
-    h = hmac.HMAC(key,hashes.SHA256())
-    h.update(data)
-    h.verify(mac)
-    
+
+def encrypt_payload(key, plaintext,nonce,associated_data=None):
+    aesgcm = AESGCM(key)
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode('utf-8'), associated_data)
+    return nonce, ciphertext
+
+def decrypt_payload(key, nonce, ciphertext_with_tag, associated_data=None):
+    aesgcm = AESGCM(key)
+    plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, associated_data)
+    return plaintext.decode('utf-8')

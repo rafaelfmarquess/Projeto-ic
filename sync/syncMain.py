@@ -28,29 +28,23 @@ class InboxCharacteristic(Characteristic):
         Characteristic.__init__(self, bus, index, CHAT_MSG_UUID, ['write'], service)
 
     def WriteValue(self, value, options):
-        packet = Packet.from_bytes(bytes(value))
-        if not packet: return []
-
         sender_path = options.get('device', 'unknown')
         peer_addr = sender_path.split('dev_')[-1].replace('_', ':')
         
         key = handshake_manager.session_keys.get(peer_addr)
         
-        if key and packet.mac:
-            try:
-                original_data = {
-                    "src": packet.src_nid, "dst": packet.dst_nid,
-                    "svc": packet.service, "plt": packet.payload, "mac": None
-                }
-                verifyMac(key, json.dumps(original_data).encode('utf-8'), bytes.fromhex(packet.mac))
-                if packet.service == "Control" and packet.payload == "KEY_CONFIRMATION":
-                    handshake_manager.confirmSession(peer_addr, isInitiator=False, received_pkt=packet)
-                else:
-                    print(f"[SINK] Mensagem AUTÊNTICA de {packet.src_nid}: {packet.payload}")
-            except Exception:
-                print(f"[!] AVISO: Mensagem corrompida ou MAC inválido de {packet.src_nid}!")
+        packet = Packet.from_bytes(bytes(value), key)
+        
+        if packet:
+            if not handshake_manager.is_nonce_valid(peer_addr, bytes.fromhex(packet.nonce)):
+                print(f"[!] REPLAY DETECTADO de {peer_addr}. Mensagem descartada.")
+                return []
+            if packet.service == "Control" and packet.payload == "KEY_CONFIRM_GCM":
+                handshake_manager.confirmSession(peer_addr, isInitiator=False, received_pkt=packet)
+            else:
+                print(f"[SINK] Mensagem CIFRADA recebida de {packet.src_nid}: {packet.payload}")
         else:
-            print(f"[!] Mensagem ignorada: Falta chave de sessão ou MAC.")
+            print(f"[!] AVISO: Falha na decifragem ou TAG inválida de {peer_addr}. Mensagem descartada.")
         
         return []
 

@@ -174,3 +174,4 @@ class KeyExchangeCharacteristic(Characteristic):
     def WriteValue(self, value, options):
         self.callback(bytes(value),options  )
         return []
+    
