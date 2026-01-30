@@ -16,7 +16,7 @@ class Packet:
         out_plt, out_mac, out_nonce = self.payload, self.mac, self.nonce
         
         if session_key:
-            ct_tag = encrypt_payload(session_key, self.payload,nonce)
+            _,ct_tag = encrypt_payload(session_key, self.payload,nonce)
             out_plt = base64.b64encode(ct_tag[:-16]).decode('utf-8')
             out_mac = ct_tag[-16:].hex() 
             out_nonce = nonce.hex()
