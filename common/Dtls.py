@@ -49,3 +49,7 @@ class DTLSHandler:
             self.session.write(message.encode())
             return self.get_outgoing_network_data()
         return None
+
+def is_client_hello(data):
+
+    return len(data) > 13 and data[0] == 22 and data[13] == 1

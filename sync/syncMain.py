@@ -10,7 +10,7 @@ from common.advertiser import Advertiser
 from common.scanner import ForwardingTable
 from common.consts import *
 from common.protocol import Packet
-from common.Dtls import DTLSHandler
+from common.Dtls import DTLSHandler, is_client_hello
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -61,6 +61,10 @@ class InboxCharacteristic(Characteristic):
     
     def _handle_dtls_e2e(self, packet, last_hop_mac):
         nid = packet.src_nid
+        
+        if nid in dtls_sessions and is_client_hello(raw_dtls):
+            print(f"[DTLS] Re-handshake detetado para {nid}. Limpando sessão anterior.")
+            del dtls_sessions[nid]
         if nid not in dtls_sessions:
             dtls_sessions[nid] = DTLSHandler(SINK_CERT_PEM, SINK_KEY_PEM, CA_CERT_PEM, is_server=True)
         
