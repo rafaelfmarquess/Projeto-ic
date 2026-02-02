@@ -17,7 +17,7 @@ class Advertisement(dbus.service.Object):
         return {
             LE_ADVERTISEMENT_IFACE: {
                 'Type': 'peripheral',
-                'ServiceUUIDs': self.uuids,
+                'ServiceUUIDs': dbus.Array(self.uuids, signature='s'),
                 'ServiceData': dbus.Dictionary({
                     SERVICE_UUID: dbus.Array([dbus.Byte(self.hop_count)], signature='y')
                 }, signature='sv'),
