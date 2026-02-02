@@ -61,6 +61,7 @@ class InboxCharacteristic(Characteristic):
     
     def _handle_dtls_e2e(self, packet, last_hop_mac):
         nid = packet.src_nid
+        raw_dtls = base64.b64decode(packet.payload)
         
         if nid in dtls_sessions and is_client_hello(raw_dtls):
             print(f"[DTLS] Re-handshake detetado para {nid}. Limpando sessão anterior.")

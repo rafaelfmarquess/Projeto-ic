@@ -18,7 +18,9 @@ class Advertisement(dbus.service.Object):
             LE_ADVERTISEMENT_IFACE: {
                 'Type': 'peripheral',
                 'ServiceUUIDs': self.uuids,
-                'ServiceData': {SERVICE_UUID: [dbus.Byte(self.hop_count)]},
+                'ServiceData': dbus.Dictionary({
+                    SERVICE_UUID: dbus.Array([dbus.Byte(self.hop_count)], signature='y')
+                }, signature='sv'),
                 'IncludeTxPower': dbus.Boolean(True),
             }
         }
