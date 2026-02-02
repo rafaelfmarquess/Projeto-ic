@@ -12,7 +12,7 @@ from common.consts import *
 import common.consts as consts
 from common.protocol import Packet
 from common.Dtls import DTLSHandler
-import nodeUi
+from node import nodeUi
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
