@@ -1,6 +1,7 @@
 import time
 import sys
 from pydbus import SystemBus
+from gi.repository import GLib 
 from common.consts import SERVICE_UUID, ADAPTER_PATH, BLUEZ_SERVICE
 
 class NodeControl:
@@ -16,7 +17,8 @@ class NodeControl:
         print(f"[*] A procurar potenciais uplinks (SIC {SERVICE_UUID})...")
         found_devices = []
         try:
-            self.adapter.SetDiscoveryFilter({'UUIDs': [SERVICE_UUID]})
+            discovery_filter = {'UUIDs': GLib.Variant('as', [SERVICE_UUID])}
+            self.adapter.SetDiscoveryFilter(discovery_filter)
             self.adapter.StartDiscovery()
             time.sleep(5)
             self.adapter.StopDiscovery()

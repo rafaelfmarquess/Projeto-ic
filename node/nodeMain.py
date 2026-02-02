@@ -255,7 +255,7 @@ def load_node_credentials(node_name):
         
 
 def main():
-    global handshake_manager,dtls
+    global handshake_manager, dtls, forwarding_table
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     
     if len(sys.argv) < 2:
@@ -269,61 +269,40 @@ def main():
     with open(f"certs/{sys.argv[1]}_key.pem", "rb") as f: key_pem = f.read()
     
     dtls = DTLSHandler(cert_pem, key_pem, ca_pem, is_server=False)
-
     handshake_manager = HandshakeManager(CA_CERT, MY_CERT, MY_KEY)
     
     ctrl = NodeControl()
     adv = Advertiser()
+    bus = dbus.SystemBus()
+    
+    app = Application(bus)
+    service = Service(bus, '/org/bluez/node/service', 0, SERVICE_UUID, True)
+    
+    inbox = NodeInboxCharacteristic(bus, 2, service, ctrl)
+    HeartB_FW = NodeHeartbeatCharacteristic(bus, 3, service)
+    monitor = HeartbeatMonitor(ctrl, None, HeartB_FW) # O monitor começa sem chave do Sink
 
-    if ctrl.establish_uplink():
-        if handshake_manager.perform_handshake(ctrl, ctrl.current_uplink):
-            
-            handshake_manager.confirmSession(ctrl.current_uplink, isInitiator=True)
-            
-            bus = dbus.SystemBus()
-            app = Application(bus)
-            service = Service(bus, '/org/bluez/node/service', 0, SERVICE_UUID, True)
-            
-            sink_pub_key = handshake_manager._get_and_verify_peer_cert(ctrl.current_uplink)
-            HeartB_FW = NodeHeartbeatCharacteristic(bus, 3, service)
-            service.add_characteristic(HeartB_FW)
-            
-            monitor = HeartbeatMonitor(ctrl, sink_pub_key,HeartB_FW)
-            GLib.timeout_add_seconds(5, monitor.check_liveness)
-            setup_heartbeat_listener(ctrl, monitor)
-                       
-            cert_pem = MY_CERT.public_bytes(serialization.Encoding.PEM)
-            service.add_characteristic(CertificateCharacteristic(bus, 0, service, cert_pem))   
-                  
-            _, local_dh_pub = generate_dh_keys()
-            dh_pub_bytes = local_dh_pub.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
-            key_chrc = KeyExchangeCharacteristic(bus, 1, service, dh_pub_bytes,
-                                               lambda val, opts: handshake_manager.handle_incoming_key(
-                                                   opts.get('device','').split('dev_')[-1].replace('_', ':'), val))
-            service.add_characteristic(key_chrc)
-            
-            inbox = NodeInboxCharacteristic(bus, 2, service,ctrl)
-            service.add_characteristic(inbox)
-            
-            app.add_service(service)
-            GLib.idle_add(inbox._start_dtls_handshake)
-            manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH), GATT_MANAGER_IFACE)
-            manager.RegisterApplication(app.path, {}, reply_handler=None, error_handler=None)
-            
-            ui = nodeUi.NodeUI(ctrl, handshake_manager, inbox, monitor, forwarding_table)
-            ui.start()
-            
-            adv.start_advertising(ctrl.my_hop_count, [SERVICE_UUID])
-            print(f"[NODE] Setup concluído. À espera de confirmação mútua e dados.")
-        else:
-            print("[!] Falha crítica no handshake. A desconectar...")
-            ctrl.destroy_all_connections()
-    else:
-        adv.start_advertising(255, [SERVICE_UUID])
+    service.add_characteristic(inbox)
+    service.add_characteristic(HeartB_FW)
+    service.add_characteristic(CertificateCharacteristic(bus, 0, service, MY_CERT.public_bytes(serialization.Encoding.PEM)))
+    
+    _, local_dh_pub = generate_dh_keys()
+    dh_pub_bytes = local_dh_pub.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    key_chrc = KeyExchangeCharacteristic(bus, 1, service, dh_pub_bytes, 
+                                        lambda val, opts: handshake_manager.handle_incoming_key(
+                                            opts.get('device','').split('dev_')[-1].replace('_', ':'), val))
+    service.add_characteristic(key_chrc)
+    
+    app.add_service(service)
 
+    manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE, ADAPTER_PATH), GATT_MANAGER_IFACE)
+    manager.RegisterApplication(app.path, {}, reply_handler=None, error_handler=None)
+
+    ui = nodeUi.NodeUI(ctrl, handshake_manager, inbox, monitor, forwarding_table)
+    ui.start()
+    
+    print("[NODE] Sistema pronto. Use o menu para procurar o Sink (Opção 2).")
+    
     GLib.MainLoop().run()
 
 if __name__ == "__main__":
