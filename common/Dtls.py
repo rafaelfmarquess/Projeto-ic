@@ -4,18 +4,21 @@ from mbedtls.pk import ECC
 
 class DTLSHandler:
     def __init__(self, cert_pem, key_pem, ca_cert_pem, is_server=False):
+        trust_store = tls.TrustStore()
+        trust_store.add(CRT.from_PEM(ca_cert_pem.decode()))
+
         self.conf = tls.DTLSConfiguration(
             validate_certificates=True,
-            trust_store=tls.TrustStore.from_pem(ca_cert_pem.decode()),
-            certificate_chain=([CRT.from_pem(cert_pem.decode())], ECC.from_pem(key_pem.decode()))
+            trust_store=trust_store,
+            certificate_chain=([CRT.from_PEM(cert_pem.decode())], ECC.from_PEM(key_pem.decode()))
         )
         
         if is_server:
             self.context = tls.DTLSServerContext(self.conf)
         else:
-            self.context = tls.DTLSClientContext(self.conf)
+            self.context = tls.ClientContext(self.conf)
             
-        self.session = self.context.wrap_buffers()
+        self.session = self.context.wrap_buffers(server_hostname="SINK")
         self.is_established = False
 
     def handle_incoming(self, data):

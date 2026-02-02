@@ -241,12 +241,12 @@ def setup_heartbeat_listener(ctrl, monitor):
 def load_node_credentials(node_name):
     global MY_CERT, MY_KEY, CA_CERT
     try:
-        with open("../certs/ca_cert.pem", "rb") as f:
+        with open("certs/ca_cert.pem", "rb") as f:
             CA_CERT = x509.load_pem_x509_certificate(f.read())
-        with open(f"../certs/{node_name}_cert.pem", "rb") as f:
+        with open(f"certs/{node_name}_cert.pem", "rb") as f:
             MY_CERT = x509.load_pem_x509_certificate(f.read())
             consts.MY_NID = get_nid_from_cert(MY_CERT)
-        with open(f"../certs/{node_name}_key.pem", "rb") as f:
+        with open(f"certs/{node_name}_key.pem", "rb") as f:
             MY_KEY = serialization.load_pem_private_key(f.read(), password=None)
         print(f"[NODE] Credenciais carregadas para {node_name}. NID oficial: {consts.MY_NID}")
     except Exception as e:
@@ -264,9 +264,9 @@ def main():
     
     load_node_credentials(sys.argv[1])
     
-    with open("../certs/ca_cert.pem", "rb") as f: ca_pem = f.read()
-    with open(f"../certs/{sys.argv[1]}_cert.pem", "rb") as f: cert_pem = f.read()
-    with open(f"../certs/{sys.argv[1]}_key.pem", "rb") as f: key_pem = f.read()
+    with open("certs/ca_cert.pem", "rb") as f: ca_pem = f.read()
+    with open(f"certs/{sys.argv[1]}_cert.pem", "rb") as f: cert_pem = f.read()
+    with open(f"certs/{sys.argv[1]}_key.pem", "rb") as f: key_pem = f.read()
     
     dtls = DTLSHandler(cert_pem, key_pem, ca_pem, is_server=False)
 
