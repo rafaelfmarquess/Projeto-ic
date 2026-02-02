@@ -5,7 +5,6 @@ from common.cryptography import verify_certificate, generate_dh_keys, derive_ses
 from cryptography import x509
 from common.protocol import Packet
 import common.consts as consts
-from common.cryptography import verifyMac
 from cryptography.hazmat.primitives import serialization
 
 class HandshakeManager:

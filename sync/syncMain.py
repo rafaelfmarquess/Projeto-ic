@@ -1,6 +1,6 @@
 import json
 import base64
-import syncUi
+from sync import syncUi
 import dbus.mainloop.glib
 from common.gatt import (
     Application, Service, Characteristic, 
@@ -157,16 +157,16 @@ class HeartbeatCharacteristic(Characteristic):
 def load_credentials():
     global MY_CERT, MY_KEY, CA_CERT, CA_CERT_PEM, SINK_CERT_PEM, SINK_KEY_PEM
     try:
-        with open("../certs/ca_cert.pem", "rb") as f:
+        with open("certs/ca_cert.pem", "rb") as f:
             CA_CERT_PEM = f.read()
             CA_CERT = x509.load_pem_x509_certificate(CA_CERT_PEM)
         
-        with open("../certs/sink_cert.pem", "rb") as f:
+        with open("certs/sink_cert.pem", "rb") as f:
             SINK_CERT_PEM = f.read()
             MY_CERT = x509.load_pem_x509_certificate(SINK_CERT_PEM)
             consts.MY_NID = get_nid_from_cert(MY_CERT)
         
-        with open("../certs/sink_key.pem", "rb") as f:
+        with open("certs/sink_key.pem", "rb") as f:
             SINK_KEY_PEM = f.read()
             MY_KEY = serialization.load_pem_private_key(SINK_KEY_PEM, password=None)
             
