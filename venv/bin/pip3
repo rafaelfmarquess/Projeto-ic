@@ -1,4 +1,4 @@
-#!/home/rafael/Projeto-ic/venv/bin/python3
+#!/home/cardoso/Desktop/Projeto-ic/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
